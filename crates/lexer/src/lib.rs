@@ -16,23 +16,12 @@ use cursor::EOF_CHAR;
 pub use crate::cursor::Cursor;
 
 use self::LiteralKind::*;
-use self::TokenKind::*;
+use self::Token::*;
 use unicode_properties::UnicodeEmoji;
 
-#[derive(Debug)]
-pub struct Token {
-    pub kind: TokenKind,
-    pub len: u32,
-}
 
-impl Token {
-    fn new(kind: TokenKind, len: u32) -> Token {
-        Token { kind, len }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TokenKind {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Token {
     /// "//" comment
     LineComment { doc_style: Option<DocStyle> },
 
@@ -55,8 +44,11 @@ pub enum TokenKind {
     /// Unknown prefix, e.g. `foo#`, `foo'`, `foo"` 
     UnknownPrefix,
 
-    /// Literals, e.g. `123`, `12.34`, `b'1234'`, `3.3e-42`
-    Literal { kind: LiteralKind, suffix_start: u32 },
+    /// Number literals, e.g. `123`, `12.34`, `b'1234'`, `3.3e-42`
+    Number { number: String },
+
+    /// String literals, e.g. `"foo"`
+    StrLiteral { string: String, literal_kind: LiteralKind },
 
     /// Lifetime annotations, e.g. `'a`
     Lifetime { starts_with_number: bool },
@@ -127,6 +119,12 @@ pub enum TokenKind {
     Eof,
 }
 
+impl Token {
+    pub fn new(token: Token) -> Token {
+        token
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DocStyle {
     Outer,
@@ -135,10 +133,6 @@ pub enum DocStyle {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LiteralKind {
-    /// Integers e.g. "42_u32", "0o777", "0b1"
-    Int { base: Base, empty_int: bool },
-    /// Floats e.g. "1.0", "1.0f32", "1.0e10"
-    Float { base: Base, empty_exponent: bool },
     /// Characters e.g. "'a'", "'\\'"
     Char { terminated: bool },
     /// Byte characters e.g. "b'a'", "b'\\'"
@@ -157,37 +151,21 @@ pub enum LiteralKind {
     RawCStr { n_hashes: Option<u8> },    
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RawStrError {
-    InvalidStarter { bad_char: char },
-    NoTerminator { expected: u32, found: u32, possible_terminator_offset: u32 },
-    TooManyDelimiters { found: u32 },
-}
 
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Base {
-    /// "0b"
-    Binary = 2,
-    /// "0o"
-    Octal = 8,
-    /// Lack of a prefix
-    Decimal = 10,
-    /// "0x"
-    Hexadecimal = 16,
-}
-
-// Use an iterator to avoid implementing the Copy trait for Token
-pub fn tokenize(input: &str) -> impl Iterator<Item = Token> + '_ {
+pub fn tokenize(input: &str) -> Vec<Token> {
     let mut cursor = Cursor::new(input);
-    std::iter::from_fn(move || {
+    let mut tokens = Vec::new();
+
+    loop {
         let token = cursor.lex();
-        if token.kind == Eof {
-            None
-        } else {
-            Some(token)
+        if token == Eof {
+            break;
         }
-    })
+
+        tokens.push(token);
+    }
+
+    tokens
 }
 
 /// Returns true if the character is a whitespace character.
@@ -242,9 +220,7 @@ impl Cursor<'_> {
             'r' => match(self.first(), self.second()) {
                 ('#', c) if is_id_start(c) => self.raw_identifier(),
                 ('#', _) | ('"', _) => {
-                    let kind = RawStr { n_hashes: None };
-                    let suffix_start = self.pos();
-                    Literal { kind, suffix_start }
+                    unimplemented!()
                 }
                 _ => self.identifier_or_unknown()
             }       
@@ -254,9 +230,9 @@ impl Cursor<'_> {
 
             // Numeric literals
             c @ '0'..='9' => {
-                let kind = self.number_kind(c);
-                let suffix_start = self.pos();
-                Literal { kind, suffix_start }
+                // TODO - Implement number literals
+                let number = self.eat_decimal_digits(c);
+                Number { number }
             }
 
             // One character tokens
@@ -292,9 +268,7 @@ impl Cursor<'_> {
             
             // String literal
             '"' => {
-            let kind = Str { terminated: true };
-                let suffix_start = self.pos();
-                Literal { kind, suffix_start }
+                unimplemented!()
             }
 
             EOF_CHAR => Eof,
@@ -302,7 +276,7 @@ impl Cursor<'_> {
             _ => Unknown,
         };
         
-        let res = Token::new(token_type, self.pos());
+        let res = Token::new(token_type);
         self.reset_pos();
         
         res
@@ -310,21 +284,21 @@ impl Cursor<'_> {
 
     /// True if the character is a whitespace character.
     /// See https://doc.rust-lang.org/reference/whitespace.html for more details.
-    fn whitespace(&mut self) -> TokenKind {
+    fn whitespace(&mut self) -> Token {
         debug_assert!(is_whitespace(self.prev()));
         self.eat_while(is_whitespace);
         Whitespace
     }
 
-    fn line_comment(&mut self) -> TokenKind {
+    fn line_comment(&mut self) -> Token {
         LineComment { doc_style: None }
     }
 
-    fn block_comment(&mut self) -> TokenKind {
+    fn block_comment(&mut self) -> Token {
         BlockComment { doc_style: None, terminated: true }
     }
 
-    fn raw_identifier(&mut self) -> TokenKind {
+    fn raw_identifier(&mut self) -> Token {
         debug_assert!(
             self.prev() == 'r' && 
             self.first() == '#' && 
@@ -338,7 +312,7 @@ impl Cursor<'_> {
         RawIdentifier
     }
 
-    fn identifier_or_unknown(&mut self) -> TokenKind {
+    fn identifier_or_unknown(&mut self) -> Token {
         debug_assert!(is_id_start(self.prev()));
         self.eat_while(is_id_continue);
 
@@ -350,56 +324,26 @@ impl Cursor<'_> {
         }
     }
 
-    fn number_kind(&mut self, first_digit: char) -> LiteralKind {
-        debug_assert!('0' <= self.prev() && self.prev() <= '9');
+    // TODO - accept hexademical digits and all literals afterwards
+    fn eat_decimal_digits(&mut self, c: char) -> String {
+        let mut number = c.to_string();
         
-        // Decode this number in the given base
-        if first_digit == '0' {
-            match self.first() {
-                _ => return Int { base: Base::Decimal, empty_int: false },
-            }
-        } else {
-            self.eat_decimal_digits();
-        };
-
-        Int { base: Base::Decimal, empty_int: false }
-    }
-
-    fn eat_decimal_digits(&mut self) -> bool {
-        let mut has_digits = false;
-
-        loop {
-            match self.first() {
-                '_' => {
-                    self.next();
-                }
-                '0'..='9' => {
-                    has_digits = true;
-                    self.next();
-                }
-                _ => break,
-            }
+        while let c @ '0'..='9' = self.next() {
+            number.push(c);
         }
 
-        has_digits
+        number
     }
 
-    fn unknown_or_invalid_identifier(&mut self) -> TokenKind {
+    fn unknown_or_invalid_identifier(&mut self) -> Token {
         match self.first() {
             _ => InvalidIdentifier,
         }
     }
 
-    fn lifetime_or_char(&mut self) -> TokenKind {
+    fn lifetime_or_char(&mut self) -> Token {
         match self.first() {
             _ => Lifetime { starts_with_number: false },
         }
     }
-
-    fn eat_literal_suffix(&mut self) {
-        while is_id_continue(self.first()) {
-            self.next();
-        }
-    }
-    
 }

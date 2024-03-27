@@ -4,6 +4,7 @@ use expect_test::{expect, Expect};
 
 fn check_lex(input: &str, expected: Expect) {
     let actual: String = tokenize(input)
+        .into_iter()
         .map(|token| format!("{:?}\n", token))
         .collect();
     expected.assert_eq(&actual);

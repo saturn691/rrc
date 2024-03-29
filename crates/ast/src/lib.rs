@@ -50,26 +50,38 @@ pub enum BinOpKind {
     ShiftRight,
 }
 
+#[derive(Clone, Debug)]
+pub enum UnaryOpKind {
+    /// `-`
+    Negate,
+    /// `!`
+    Not,
+    /// `*`
+    Dereference,
+    /// `&`
+    Reference,
+    /// `&mut`
+    MutableReference,
+}
+
+
 #[derive(Debug)]
-pub enum TokenKind {
-    Identifier { name: String },
+pub enum Node {
+    // Root nodes
+    Identifier { id: String },
     Number { value: String },
-    Literal { kind: LiteralKind, value: String, suffix: Option<String> },
-    BinOp { kind: BinOpKind },
-    BinOpEqual { kind: BinOpKind },
-}
+    Literal { kind: LiteralKind, value: String },
+    
+    // Unary operations
+    UnaryOp { kind: UnaryOpKind, operand: Box<Node> },
 
-#[derive(Debug)]
-pub struct Node {
-    pub kind: TokenKind,
-    pub children: Vec<Box<Node>>,
-}
+    // Binary operations
+    BinOp { kind: BinOpKind, left: Box<Node>, right: Box<Node> },
+    BinOpEqual { kind: BinOpKind, left: Box<Node>, right: Box<Node> },
 
-impl Node {
-    pub fn new(kind: TokenKind) -> Self {
-        Self {
-            kind,
-            children: Vec::new(),
-        }
-    }
+    // Statements
+    FunctionDef { name: String, params: Vec<Node>, body: Box<Node> },
+    FunctionCall { name: String, args: Vec<Node> },
+    Return { value: Box<Node> },
+    Statements { statements: Vec<Node> },
 }

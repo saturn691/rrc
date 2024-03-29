@@ -1,13 +1,12 @@
 use std::str::Chars;
 
 /// Peekable iterator over a string.
-/// 
+///
 /// first() to peek
 /// next() to advance
 pub struct Cursor<'a> {
     chars: Chars<'a>,
     pos: usize,
-    #[cfg(debug_assertions)]
     prev: char,
 }
 
@@ -26,15 +25,9 @@ impl<'a> Cursor<'a> {
 
     /// Returns the previous character that was at the cursor.
     pub(crate) fn prev(&self) -> char {
-        #[cfg(debug_assertions)]
-        {
-            self.prev
-        }
-        #[cfg(not(debug_assertions))]
-        {
-            EOF_CHAR
-        }
+        self.prev
     }
+    
 
     /// Peeks at the next character in the input without advancing the cursor.
     pub fn first(&self) -> char {
@@ -68,7 +61,7 @@ impl<'a> Cursor<'a> {
     /// at the cursor before advancing.
     pub(crate) fn next(&mut self) -> char {
         let ch = self.chars.next().unwrap_or(EOF_CHAR);
-        
+
         #[cfg(debug_assertions)]
         {
             self.prev = ch;
@@ -79,9 +72,17 @@ impl<'a> Cursor<'a> {
     }
 
     /// Eats characters while the predicate returns true.
-    pub(crate) fn eat_while(&mut self, mut predicate: impl FnMut(char) -> bool) {
+    pub(crate) fn eat_while(
+        &mut self, 
+        mut predicate: impl FnMut(char) -> bool
+    ) -> String {
+        let mut eaten: String = self.prev().to_string();
+
         while predicate(self.first()) && self.first() != EOF_CHAR {
+            eaten.push(self.first());
             self.next();
         }
+
+        eaten
     }
 }

@@ -1,7 +1,7 @@
 use parser::Parser;
 
 fn main() {
-    let input = "123".to_string();
+    let input = "fn return_zero() { 0 + 0 }".to_string();
 
     let mut parser = Parser::new();
     

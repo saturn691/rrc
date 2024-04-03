@@ -3,8 +3,6 @@
 //! Turns the lexer tokens into an AST
 //! Uses recursive descent parsing
 
-use std::os::linux::raw::stat;
-
 use ast;
 use lexer::Token;
 
@@ -31,22 +29,46 @@ impl<'a> Parser {
 
     /// FUNCTION_DEFINITION
     /// : 'fn' IDENTIFIER '(' PARAMS ')' '{' STATEMENTS '}'
-    /// ;
+    /// ; 'fn' IDENTIFIER '(' PARAMS ')' '->' RETURN_TYPE '{' STATEMENTS '}'
     fn parse_fn(&mut self) -> Result<ast::Node, String> {
         // TODO consider function modifiers like `pub`, `unsafe`, `const`, etc.
         self.expect(Token::Fn);
         let name = self.expect_identifier()?;
+        let mut r_type = ast::Type::Primitive(ast::PrimitiveType::Void);
+
         self.expect(Token::OpenParen);
         // TODO parse parameters
         self.expect(Token::CloseParen);
+
+        match self.peek(0) {
+            Some(Token::RightArrow) => {
+                self.expect(Token::RightArrow);
+                r_type = self.parse_return_type()?;
+           }
+            _ => {}
+        }
         
         let statements = self.parse_block_common()?;
     
         Ok(ast::Node::FunctionDef {
             name: name, 
-            params: Vec::new(), 
+            params: Vec::new(),
+            return_type: r_type,
             body: Box::new(statements)
         })
+    }
+
+    fn parse_return_type(&mut self) -> Result<ast::Type, String> {
+        let id = self.expect_identifier()?;
+        
+        match id.as_str() {
+            "i8" => Ok(ast::Type::Primitive(ast::PrimitiveType::I8)),
+            "i16" => Ok(ast::Type::Primitive(ast::PrimitiveType::I16)),
+            "i32" => Ok(ast::Type::Primitive(ast::PrimitiveType::I32)),
+            "i64" => Ok(ast::Type::Primitive(ast::PrimitiveType::I64)),
+
+            _ => Err("Unknown type".to_string())
+        }
     }
 
     fn parse_block_common(&mut self) -> Result<ast::Node, String> {
@@ -58,14 +80,14 @@ impl<'a> Parser {
     }
 
     fn parse_statements(&mut self) -> Result<ast::Node, String> {
-        let mut statements: Vec<ast::Node> = Vec::new();
+        let mut statements: Vec<Box<ast::Node>> = Vec::new();
         
         while let Some(token) = self.peek(0) {
             match token {
                 Token::CloseBrace => break,
                 _ => {
                     let statement = self.parse_statement()?;
-                    statements.push(statement);
+                    statements.push(Box::new(statement));
                 }
             }
         }

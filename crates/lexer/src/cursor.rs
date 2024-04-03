@@ -40,19 +40,7 @@ impl<'a> Cursor<'a> {
         chars.next();
         chars.next().unwrap_or(EOF_CHAR)
     }
-
-    /// Peeks at the third character in the input without advancing the cursor.
-    pub(crate) fn third(&self) -> char {
-        let mut chars = self.chars.clone();
-        chars.next();
-        chars.next();
-        chars.next().unwrap_or(EOF_CHAR)
-    }
-
-    pub(crate) fn pos(&self) -> u32 {
-        self.pos as u32
-    }
-
+    
     pub(crate) fn reset_pos(&mut self) {
         self.pos = 0;
     }

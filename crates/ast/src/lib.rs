@@ -1,3 +1,7 @@
+pub mod types;
+
+pub use types::*;
+
 #[derive(Debug)]
 pub enum LiteralKind {
     /// Boolean literal e.g. `true`
@@ -80,8 +84,8 @@ pub enum Node {
     BinOpEqual { kind: BinOpKind, left: Box<Node>, right: Box<Node> },
 
     // Statements
-    FunctionDef { name: String, params: Vec<Node>, body: Box<Node> },
+    FunctionDef { name: String, params: Vec<Node>, return_type: Type, body: Box<Node> },
     FunctionCall { name: String, args: Vec<Node> },
     Return { value: Box<Node> },
-    Statements { statements: Vec<Node> },
+    Statements { statements: Vec<Box<Node>> },
 }

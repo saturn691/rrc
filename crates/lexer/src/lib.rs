@@ -57,6 +57,10 @@ pub enum Token {
     // Keywords
     Fn,
 
+    // Tokens
+    
+    RightArrow,
+
     // One-character tokens
 
     /// ";"
@@ -239,6 +243,14 @@ impl Cursor<'_> {
                 Number { number }
             }
 
+            '-' => match self.first() {
+                '>' => {
+                    self.next();
+                    RightArrow
+                }
+                _ => Minus,
+            }
+            
             // One character tokens
             ';' => Semicolon,
             ':' => Colon,
@@ -262,7 +274,6 @@ impl Cursor<'_> {
             '&' => And,
             '|' => Or,
             '+' => Plus,
-            '-' => Minus,
             '*' => Star,
             '%' => Percent,
             '^' => Caret,

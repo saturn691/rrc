@@ -43,7 +43,7 @@ pub enum BinOpKind {
     /// `%`
     Modulo,
     /// `^`
-    Exponent,
+    Xor,
     /// `&`
     And,
     /// `|`

@@ -118,6 +118,12 @@ impl Codegen {
                 // Update the hashmap
                 self.place_map.insert(place.clone(), reg.clone());
             }
+
+            Rvalue::UnaryOp(op, operand) => {
+                self.build_unary(op, operand, &reg, &ty);
+
+                self.place_map.insert(place.clone(), reg.clone());
+            }
         }
 
         reg
@@ -138,6 +144,11 @@ impl Codegen {
             BinOp::Mul => "mul",
             BinOp::Div => "sdiv",
             BinOp::Rem => "srem",
+            BinOp::ShiftLeft => "shl",
+            BinOp::ShiftRight => "lshr",
+            BinOp::BitAnd => "and",
+            BinOp::BitOr => "or",
+            BinOp::BitXor => "xor",
             _ => unimplemented!()
         };
 
@@ -148,6 +159,31 @@ impl Codegen {
         self.code += format!("{}{} = {} {} {}, {}\n", 
             INDENT, reg, op_str, ty, reg1, reg2
         ).as_str();
+    }
+
+    /// Lowers unary operations
+    fn build_unary(
+        &mut self, 
+        op: &UnOp, 
+        operand: &Box<Operand>,
+        reg: &String,
+        ty: &String
+    ) {
+        // Get the register name for the operand
+        let reg1 = self.get_operand_reg(operand);
+
+        match op {
+            UnOp::Neg => {
+                self.code += format!("{}{} = sub {} 0, {}\n", 
+                    INDENT, reg, ty, reg1
+                ).as_str();
+            },
+            UnOp::Not => {
+                self.code += format!("{}{} = xor {} {}, -1\n", 
+                    INDENT, reg, ty, reg1
+                ).as_str();
+            },
+        }
     }
 
     fn get_operand_reg(&self, operand: &Operand) -> String {

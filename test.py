@@ -38,6 +38,7 @@ BUILD_TIMEOUT_SECONDS = 60
 RUN_TIMEOUT_SECONDS = 15
 TIMEOUT_RETURNCODE = 124
 
+
 @dataclass
 class Result:
     test_case_name: str
@@ -50,7 +51,7 @@ class Result:
         timeout = "[TIMED OUT] " if self.timeout else ""
         if self.passed:
             return f'{self.test_case_name}\n\t> {GREEN}Pass{RESET}\n'
-        
+
         return f'{self.test_case_name}\n{RED}{timeout + self.error_log}{RESET}\n'
 
 
@@ -61,7 +62,7 @@ def run_test(test_file: Path) -> Result:
     def relevant_files(component):
         return f"{log_path}.{component}.stderr.log \n\t {log_path}.{component}.stdout.log"
     test_name = test_file.relative_to(PROJECT_LOCATION)
-    
+
     # Relative path w.r.t. COMPILER_TEST_FOLDER
     relative_path = test_file.relative_to(COMPILER_TEST_FOLDER)
     log_path = Path(OUTPUT_FOLDER).joinpath(
@@ -98,7 +99,7 @@ def run_test(test_file: Path) -> Result:
         log_path=f"{log_path}.llvm",
     )
     if return_code != 0:
-        msg = f"\t> Failed to LLVM: \n\t {compiler_log_file_str} \n\t {relevant_files('assembler')}"
+        msg = f"\t> Failed to LLVM: \n\t {compiler_log_file_str} \n\t {relevant_files('llvm')}"
         return Result(
             test_case_name=test_name, return_code=return_code, passed=False,
             timeout=timed_out, error_log=msg)
@@ -106,7 +107,7 @@ def run_test(test_file: Path) -> Result:
     # Assemble
     return_code, _, timed_out = run_subprocess(
         cmd=[
-            "clang", f"{log_path}.s", 
+            "clang", f"{log_path}.s",
             "-o", f"{log_path}.out"
         ],
         timeout=RUN_TIMEOUT_SECONDS,
@@ -177,7 +178,7 @@ def run_subprocess(
         return e.returncode, f"{e.cmd} failed with return code {e.returncode}", False
     except subprocess.TimeoutExpired as e:
         return TIMEOUT_RETURNCODE, f"{e.cmd} took more than {e.timeout}", True
-    
+
     return 0, "", False
 
 
@@ -186,7 +187,7 @@ def build(silent: bool) -> bool:
     Wrapper for `cargo build`
     """
     print(GREEN + "Building compiler..." + RESET)
-    
+
     return_code, error_message, _ = run_subprocess(
         cmd=["cargo", "build"],
         timeout=BUILD_TIMEOUT_SECONDS,
@@ -196,7 +197,7 @@ def build(silent: bool) -> bool:
     if return_code != 0:
         print(RED + "Error when making:" + error_message + RESET)
         return False
-    
+
     return True
 
 
@@ -206,7 +207,7 @@ def run_tests(args):
     """
     tests = list(Path(args.dir).rglob("*.rs"))
     tests = sorted(tests, key=lambda x: (x.parent.name, x.name))
-    
+
     results = []
 
     for test in tests:
@@ -214,7 +215,7 @@ def run_tests(args):
         results.append(result.passed)
         if not args.short or not result.passed:
             print(result.to_log())
-    
+
     passing = sum(results)
     total = len(results)
 
@@ -243,8 +244,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "-s", "--short", action="store_true", default=False,
         help="Disable verbose output into the terminal. Note that all logs will "
-        "be stored automatically into log files regardless of this option."
-    )
+        "be stored automatically into log files regardless of this option.")
     parser.add_argument(
         "--version",
         action="version",
@@ -262,8 +262,9 @@ def main():
 
     if not build(args.short):
         return
-    
+
     run_tests(args)
+
 
 if __name__ == "__main__":
     try:

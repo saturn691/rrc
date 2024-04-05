@@ -14,6 +14,7 @@ pub fn hir_build(root: Node) -> Result<Body, String> {
 enum CallFrame {
     Return,
     Binary,
+    Unary
 }
 
 #[derive(Debug)]
@@ -124,6 +125,9 @@ impl Builder {
             ExprKind::Binary(left, bin_op , right) => {
                 self.build_binary(left, bin_op, right, target_block, target_place, target_type)
             }
+            ExprKind::Unary(unop, expr) => {
+                self.build_unary(unop, expr, target_block, target_place, target_type)
+            }
 
             _ => unimplemented!()
         };
@@ -134,6 +138,31 @@ impl Builder {
                 Box::new(rvalue)
             )
         )
+    }
+
+    fn build_unary(
+        &mut self,
+        unop: UnaryOpKind,
+        expr: Box<Expr>,
+        target_block: usize,
+        target_place: &Place,
+        target_type: Option<Type>
+    ) -> Rvalue {
+        let unop = match unop {
+            UnaryOpKind::Negate => UnOp::Neg,
+            UnaryOpKind::Not => UnOp::Not,
+            _ => unimplemented!()
+        };
+
+        self.call_frame.push(CallFrame::Unary);
+        self.build_expr(expr, target_block, target_place, target_type);
+        self.call_frame.pop();
+
+        Rvalue::UnaryOp(
+            unop,
+            Box::new(Operand::Copy(target_place.clone()))
+        )
+        
     }
 
     fn build_binary(
@@ -158,6 +187,11 @@ impl Builder {
             BinOpKind::Multiply => BinOp::Mul,
             BinOpKind::Divide => BinOp::Div,
             BinOpKind::Modulo => BinOp::Rem,
+            BinOpKind::ShiftLeft => BinOp::ShiftLeft,
+            BinOpKind::ShiftRight => BinOp::ShiftRight,
+            BinOpKind::And => BinOp::BitAnd,
+            BinOpKind::Or => BinOp::BitOr,
+            BinOpKind::Xor => BinOp::BitXor,
             _ => unimplemented!()
         };
 

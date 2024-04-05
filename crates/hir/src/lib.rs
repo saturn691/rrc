@@ -26,6 +26,12 @@ pub enum BinOp {
     Ge,
 }
 
+#[derive(Clone, Debug)]
+pub enum UnOp {
+    Neg,
+    Not,
+}
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum Place {
     /// Points to the `local_decl`
@@ -39,7 +45,9 @@ pub enum Rvalue {
     /// Operand unchanged
     Use(Operand),
     /// Binary operation
-    BinaryOp(BinOp, Box<Operand>, Box<Operand>)
+    BinaryOp(BinOp, Box<Operand>, Box<Operand>),
+    /// Unary operation
+    UnaryOp(UnOp, Box<Operand>),
 }
 
 #[derive(Clone, Debug)]

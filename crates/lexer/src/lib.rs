@@ -59,7 +59,12 @@ pub enum Token {
 
     // Tokens
     
+    /// ->
     RightArrow,
+    /// <<
+    ShiftLeft,
+    /// >>
+    ShiftRight,
 
     // One-character tokens
 
@@ -243,6 +248,7 @@ impl Cursor<'_> {
                 Number { number }
             }
 
+            // Arrow or negative number
             '-' => match self.first() {
                 '>' => {
                     self.next();
@@ -254,6 +260,23 @@ impl Cursor<'_> {
                     Number { number }
                 }
                 _ => Minus,
+            }
+            
+            // Two character tokens
+            '>' => match self.first() {
+                '>' => {
+                    self.next();
+                    ShiftRight
+                }
+                _ => Gt,
+            }
+
+            '<' => match self.first() {
+                '<' => {
+                    self.next();
+                    ShiftLeft
+                }
+                _ => Lt,
             }
             
             // One character tokens
@@ -274,8 +297,6 @@ impl Cursor<'_> {
             '$' => Dollar,
             '=' => Eq,
             '!' => Bang,
-            '<' => Lt,
-            '>' => Gt,
             '&' => And,
             '|' => Or,
             '+' => Plus,

@@ -37,7 +37,7 @@ fn main() {
     let root = parser.parse(&input).unwrap();
     
     println!();
-    println!("{:?}", root);
+    println!("{:#?}", root);
     println!();
 
     let hir = hir::hir_build(root);

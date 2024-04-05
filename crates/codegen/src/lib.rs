@@ -24,6 +24,7 @@ struct Codegen {
     /// Due to the SSA nature of the codegen, we need to keep track of the
     /// mapping between places and registers
     place_map: HashMap<Place, String>,
+    const_map: HashMap<Const, String>,
 }
 
 impl Codegen {
@@ -34,6 +35,7 @@ impl Codegen {
             return_type: String::new(),
             reg_id: 0,
             place_map: HashMap::new(),
+            const_map: HashMap::new(),
         }
     }
 
@@ -70,7 +72,7 @@ impl Codegen {
                 Statement::Assign(place, rvalue) => {
                     return_reg = self.build_assign(place, rvalue);
                 }
-                _ => {}
+                _ => unimplemented!()
             }
         }
 
@@ -89,17 +91,18 @@ impl Codegen {
     fn build_assign(&mut self, place: &Place, rvalue: &Rvalue) -> String {
         let reg: String = self.get_unique_id();
         let mut ty: String = String::new();
-        // Update the hashmap
-        self.place_map.insert(place.clone(), reg.clone());
-
+        
         match place {
             Place::Local(id) => {
                 ty = self.body.local_decls[*id].ty.to_string();
             }
         }
-
+        
         match rvalue {
             Rvalue::Use(operand) => {
+                // Update the hashmap
+                self.place_map.insert(place.clone(), reg.clone());
+                
                 match operand {
                     Operand::Constant(constant) => {
                         self.code += format!("{}{} = add {} {}, 0\n", 
@@ -109,10 +112,57 @@ impl Codegen {
                     _ => {}
                 }
             },
-            _ => {}
+            Rvalue::BinaryOp(op, operand1, operand2) => {
+                self.build_binary(op, operand1, operand2, &reg, &ty);
+                
+                // Update the hashmap
+                self.place_map.insert(place.clone(), reg.clone());
+            }
         }
 
         reg
+    }
+
+    /// Lowers binary operations
+    fn build_binary(
+        &mut self, 
+        op: &BinOp, 
+        operand1: &Box<Operand>, 
+        operand2: &Box<Operand>,
+        reg: &String,
+        ty: &String
+    ) {
+        let op_str = match op {
+            BinOp::Add => "add",
+            BinOp::Sub => "sub",
+            BinOp::Mul => "mul",
+            BinOp::Div => "sdiv",
+            BinOp::Rem => "srem",
+            _ => unimplemented!()
+        };
+
+        // Get the register name for the operands
+        let reg1 = self.get_operand_reg(operand1);
+        let reg2 = self.get_operand_reg(operand2);
+
+        self.code += format!("{}{} = {} {} {}, {}\n", 
+            INDENT, reg, op_str, ty, reg1, reg2
+        ).as_str();
+    }
+
+    fn get_operand_reg(&self, operand: &Operand) -> String {
+        match operand {
+            Operand::Copy(place) => {
+                match self.place_map.get(&place) {
+                    Some(reg) => reg.clone(),
+                    None => {
+                        panic!("Place not found in place_map: {:?}", place)
+                    }
+                }
+            },
+
+            _ => panic!("Operand not supported")
+        }
     }
 
     /// Get a unique identifier for a register for SSA

@@ -68,24 +68,119 @@ pub enum UnaryOpKind {
     MutableReference,
 }
 
+#[derive(Debug)]
+pub enum PatKind {
+    Identifier(String)
+}
 
 #[derive(Debug)]
-pub enum Node {
-    // Root nodes
-    Identifier { id: String },
-    Number { value: String },
-    Literal { kind: LiteralKind, value: String },
-    
-    // Unary operations
-    UnaryOp { kind: UnaryOpKind, operand: Box<Node> },
+pub struct Pat {
+    pub kind: PatKind,
+}
 
-    // Binary operations
-    BinOp { kind: BinOpKind, left: Box<Node>, right: Box<Node> },
-    BinOpEqual { kind: BinOpKind, left: Box<Node>, right: Box<Node> },
+#[derive(Debug)]
+pub struct Param {
+    pub ty: Type,
+    pub pat: Pat
+}
 
+#[derive(Debug)]
+pub struct FnSig {
+    pub inputs: Vec<Param>,
+    pub return_type: Type,
+}
+
+/// A segment of a path e.g. `std` or `io`
+#[derive(Debug)]
+pub struct PathSegment {
+    pub identifier: String,
+}
+
+/// A path is a sequence of identifiers separated by `::`
+/// e.g. `std::io::Read`
+#[derive(Debug)]
+pub struct Path {
+    pub segments: Vec<PathSegment>,
+}
+
+impl Path {
+    pub fn new(id: String) -> Self {
+        Path {
+            segments: vec![PathSegment {
+                identifier: id
+            }]
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum ExprKind {
+    Unary(UnaryOpKind, Box<Expr>),
+    Binary(Box<Expr>, BinOpKind, Box<Expr>),
+    Literal(String),
+    Path(Path),
+}
+
+#[derive(Debug)]
+pub struct Expr {
+    pub kind: ExprKind,
+}
+
+#[derive(Debug)]
+pub enum LocalKind {
+    /// `let x;`
+    Decl,
+    /// `let x = 42;`
+    Init(Box<Expr>),
+    /// `let Some(x) = y else { ... }`
+    InitElse(Box<Expr>, Box<Block>),
+}
+
+#[derive(Debug)]
+pub struct Local {
+    pub pat: Box<Pat>,
+    pub ty: Option<Box<Type>>,
+    pub kind: LocalKind,
+}
+
+#[derive(Debug)]
+pub enum StmtKind {
+    /// Local (let) bindings e.g. `let x = 42;`
+    Let(Box<Local>),
+    /// Item definitions e.g. `fn foo() {}`
+    Item(Box<Node>),
+    /// Expressions without a semicolon e.g. `foo()`
+    Expr(Box<Expr>),
+    /// Expr with a semicolon e.g. `foo();`
+    Semi(Box<Expr>)
+}
+
+#[derive(Debug)]
+pub struct Stmt {
+    pub kind: StmtKind,
+}
+
+/// A block is a sequence of statements
+/// e.g. `{ println!() }` as in `fn main() { println!(); }`
+#[derive(Debug)]
+pub struct Block {
+    pub stmts: Vec<Stmt>,
+}
+
+#[derive(Debug)]
+pub struct Fn {
+    pub sig: FnSig,
+    pub body: Option<Box<Block>>
+}
+
+#[derive(Debug)]
+pub enum NodeKind {
     // Statements
-    FunctionDef { name: String, params: Vec<Node>, return_type: Type, body: Box<Node> },
-    FunctionCall { name: String, args: Vec<Node> },
-    Return { value: Box<Node> },
-    Statements { statements: Vec<Box<Node>> },
+    Fn(Box<Fn>),
+}
+
+#[derive(Debug)]
+pub struct Node {
+    pub kind: NodeKind,
+    pub identifier: Option<String>,
 }

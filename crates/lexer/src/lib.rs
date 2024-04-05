@@ -237,9 +237,9 @@ impl Cursor<'_> {
             c if is_id_start(c) => self.identifier_or_unknown(),
 
             // Numeric literals
-            c @ '0'..='9' => {
+            '0'..='9' => {
                 // TODO - Implement number literals
-                let number = self.eat_decimal_digits(c);
+                let number = self.eat_decimal_digits();
                 Number { number }
             }
 
@@ -247,6 +247,11 @@ impl Cursor<'_> {
                 '>' => {
                     self.next();
                     RightArrow
+                }
+                '0'..='9' => {
+                    self.next();
+                    let number = String::from("-") + &self.eat_decimal_digits();
+                    Number { number }
                 }
                 _ => Minus,
             }
@@ -349,14 +354,9 @@ impl Cursor<'_> {
     }
 
     // TODO - accept hexademical digits and all literals afterwards
-    fn eat_decimal_digits(&mut self, c: char) -> String {
-        let mut number = c.to_string();
-
-        while let c @ '0'..='9' = self.next() {
-            number.push(c);
-        }
-
-        number
+    fn eat_decimal_digits(&mut self) -> String {
+        debug_assert!(self.prev().is_digit(10));
+        self.eat_while(|c| c.is_digit(10))
     }
 
     fn unknown_or_invalid_identifier(&mut self) -> Token {

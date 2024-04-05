@@ -18,7 +18,6 @@ impl<'a> Cursor<'a> {
         Cursor {
             chars: input.chars(),
             pos: 0,
-            #[cfg(debug_assertions)]
             prev: EOF_CHAR,
         }
     }
@@ -27,7 +26,6 @@ impl<'a> Cursor<'a> {
     pub(crate) fn prev(&self) -> char {
         self.prev
     }
-    
 
     /// Peeks at the next character in the input without advancing the cursor.
     pub fn first(&self) -> char {

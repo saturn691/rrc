@@ -23,7 +23,7 @@ impl<'a> Parser {
     pub fn parse(&mut self, input: &String) -> Result<ast::Node, String> {
         self.tokens = lexer::tokenize(input);
         self.index = 0;
-        println!("Tokens: {:?}", self.tokens);
+        println!("Tokens: {:#?}", self.tokens);
         self.parse_fn()
     }  
 
@@ -47,14 +47,21 @@ impl<'a> Parser {
            }
             _ => {}
         }
-        
-        let statements = self.parse_block_common()?;
-    
-        Ok(ast::Node::FunctionDef {
-            name: name, 
-            params: Vec::new(),
-            return_type: r_type,
-            body: Box::new(statements)
+
+        let statements: ast::Block = self.parse_block_common()?;
+
+        // Build the node
+        let fn_node = ast::Fn {
+            sig: ast::FnSig { 
+                inputs: Vec::new(),
+                return_type: r_type
+            },
+            body: Some(Box::new(statements))
+        };
+
+        Ok(ast::Node {
+            kind: ast::NodeKind::Fn(Box::new(fn_node)),
+            identifier: Some(name)
         })
     }
 
@@ -71,40 +78,48 @@ impl<'a> Parser {
         }
     }
 
-    fn parse_block_common(&mut self) -> Result<ast::Node, String> {
+    fn parse_block_common(&mut self) -> Result<ast::Block, String> {
         self.expect(Token::OpenBrace);
-        let statements = self.parse_statements();
+        let statements = self.parse_statements()?;
         self.expect(Token::CloseBrace);
-    
-        statements
+        
+        Ok(
+            ast::Block {
+                stmts: statements
+            }
+        )
     }
 
-    fn parse_statements(&mut self) -> Result<ast::Node, String> {
-        let mut statements: Vec<Box<ast::Node>> = Vec::new();
+    fn parse_statements(&mut self) -> Result<Vec<ast::Stmt>, String> {
+        let mut statements: Vec::<ast::Stmt> = Vec::new();
         
         while let Some(token) = self.peek(0) {
             match token {
                 Token::CloseBrace => break,
                 _ => {
                     let statement = self.parse_statement()?;
-                    statements.push(Box::new(statement));
+                    statements.push(statement);
                 }
             }
         }
 
-        Ok(ast::Node::Statements { statements })
+        Ok(statements)
     }
 
-    fn parse_statement(&mut self) -> Result<ast::Node, String> {
+    fn parse_statement(&mut self) -> Result<ast::Stmt, String> {
         let expr = self.parse_expression()?;
+        
         match self.peek(0) {
             Some(Token::Semicolon) => {
                 self.expect(Token::Semicolon);
-                Ok(expr)
+                Ok(ast::Stmt { 
+                    kind: ast::StmtKind::Semi(Box::new(expr)) 
+                })
             },
-            // No semicolon, a return statement
             _ => {
-                Ok(ast::Node::Return { value: Box::new(expr) })
+                Ok(ast::Stmt { 
+                    kind: ast::StmtKind::Expr(Box::new(expr)) 
+                })
             }
         }
         // let
@@ -118,17 +133,17 @@ impl<'a> Parser {
         // match
         // unsafe
         // block
-        // expression
+        // expression -/
     }
 
     /// Reference: https://doc.rust-lang.org/reference/expressions.html
-    fn parse_expression(&mut self) -> Result<ast::Node, String> {
+    fn parse_expression(&mut self) -> Result<ast::Expr, String> {
         self.parse_assignment()
         
         // expression , assignment_expression
     }
 
-    fn parse_assignment(&mut self) -> Result<ast::Node, String> {
+    fn parse_assignment(&mut self) -> Result<ast::Expr, String> {
         self.parse_ellipsis()
         
         // =
@@ -144,26 +159,26 @@ impl<'a> Parser {
         // >>=
     }
    
-    fn parse_ellipsis(&mut self) -> Result<ast::Node, String> {
+    fn parse_ellipsis(&mut self) -> Result<ast::Expr, String> {
         self.parse_logical_or()
         
         // ..
         // ..=
     }
    
-    fn parse_logical_or(&mut self) -> Result<ast::Node, String> {
+    fn parse_logical_or(&mut self) -> Result<ast::Expr, String> {
         self.parse_logical_and()
         
         // ||
     }
 
-    fn parse_logical_and(&mut self) -> Result<ast::Node, String> {
+    fn parse_logical_and(&mut self) -> Result<ast::Expr, String> {
         self.parse_comparison()
         
         // &&
     }
 
-    fn parse_comparison(&mut self) -> Result<ast::Node, String> {
+    fn parse_comparison(&mut self) -> Result<ast::Expr, String> {
         self.parse_or()
         
         // ==
@@ -174,25 +189,25 @@ impl<'a> Parser {
         // <=
     }
     
-    fn parse_or(&mut self) -> Result<ast::Node, String> {
+    fn parse_or(&mut self) -> Result<ast::Expr, String> {
         self.parse_xor()
         
         // |
     }
 
-    fn parse_xor(&mut self) -> Result<ast::Node, String> {
+    fn parse_xor(&mut self) -> Result<ast::Expr, String> {
         self.parse_and()
         
         // ^
     }
 
-    fn parse_and(&mut self) -> Result<ast::Node, String> {
+    fn parse_and(&mut self) -> Result<ast::Expr, String> {
         self.parse_shift()
         
         // &
     }
 
-    fn parse_shift(&mut self) -> Result<ast::Node, String> {
+    fn parse_shift(&mut self) -> Result<ast::Expr, String> {
         self.parse_additive()
         
         // <<
@@ -203,33 +218,34 @@ impl<'a> Parser {
     /// : MULTIPLICATIVE_EXPRESSION
     /// | MULTIPLICATIVE_EXPRESSION '+' ADDITIVE_EXPRESSION
     /// | MULTIPLICATIVE_EXPRESSION '-' ADDITIVE_EXPRESSION
-    fn parse_additive(&mut self) -> Result<ast::Node, String> {
+    fn parse_additive(&mut self) -> Result<ast::Expr, String> {
         let left = self.parse_multiplicative()?;
         let token = self.peek(0);
+        let bin_op_kind: ast::BinOpKind;
 
         match token {
             Some(Token::Plus) => {
                 self.expect(Token::Plus);
-                let right = self.parse_additive()?;
-                Ok(ast::Node::BinOp { 
-                    kind: ast::BinOpKind::Plus,
-                    left: Box::new(left),
-                    right: Box::new(right)
-                })
+                bin_op_kind = ast::BinOpKind::Plus;
             }
 
             Some(Token::Minus) => {
                 self.expect(Token::Minus);
-                let right = self.parse_additive()?;
-                Ok(ast::Node::BinOp { 
-                    kind: ast::BinOpKind::Minus,
-                    left: Box::new(left),
-                    right: Box::new(right)
-                })
+                bin_op_kind = ast::BinOpKind::Minus;
             }
-
-            _ => Ok(left)
+            
+            // Short circuit
+            _ => return Ok(left)
         }
+
+        let right = self.parse_additive()?;
+        Ok(ast::Expr { 
+            kind: ast::ExprKind::Binary(
+                Box::new(left), 
+                bin_op_kind, 
+                Box::new(right)
+            ) 
+        })
     }
 
     /// MULTIPLICATIVE_EXPRESSION
@@ -237,52 +253,48 @@ impl<'a> Parser {
     /// | CAST_EXPRESSION '*' MULTIPLICATIVE_EXPRESSION
     /// | CAST_EXPRESSION '/' MULTIPLICATIVE_EXPRESSION
     /// | CAST_EXPRESSION '%' MULTIPLICATIVE_EXPRESSION
-    fn parse_multiplicative(&mut self) -> Result<ast::Node, String> {
+    fn parse_multiplicative(&mut self) -> Result<ast::Expr, String> {
         let left = self.parse_cast()?;
         let token = self.peek(0);
+        let bin_op_kind: ast::BinOpKind;
 
         match token {
             Some(Token::Star) => {
                 self.expect(Token::Star);
-                let right = self.parse_multiplicative()?;
-                Ok(ast::Node::BinOp { 
-                    kind: ast::BinOpKind::Multiply,
-                    left: Box::new(left),
-                    right: Box::new(right)
-                })
+                bin_op_kind = ast::BinOpKind::Multiply;
             }
 
             Some(Token::Slash) => {
                 self.expect(Token::Slash);
-                let right = self.parse_multiplicative()?;
-                Ok(ast::Node::BinOp { 
-                    kind: ast::BinOpKind::Divide,
-                    left: Box::new(left),
-                    right: Box::new(right)
-                })
+                bin_op_kind = ast::BinOpKind::Divide;
             }
 
             Some(Token::Percent) => {
                 self.expect(Token::Percent);
-                let right = self.parse_multiplicative()?;
-                Ok(ast::Node::BinOp { 
-                    kind: ast::BinOpKind::Modulo,
-                    left: Box::new(left),
-                    right: Box::new(right)
-                })
+                bin_op_kind = ast::BinOpKind::Modulo;
             }
-
-            _ => Ok(left)
+            
+            // Short circuit
+            _ => return Ok(left)
         }
+        
+        let right = self.parse_multiplicative()?;                
+        Ok(ast::Expr { 
+            kind: ast::ExprKind::Binary(
+                Box::new(left), 
+                bin_op_kind,
+                Box::new(right)
+            ) 
+        })
     }
 
-    fn parse_cast(&mut self) -> Result<ast::Node, String> {
+    fn parse_cast(&mut self) -> Result<ast::Expr, String> {
         self.parse_unary()
         
         // as
     }
 
-    fn parse_unary(&mut self) -> Result<ast::Node, String> {
+    fn parse_unary(&mut self) -> Result<ast::Expr, String> {
         self.parse_postfix()
         
         // -
@@ -292,7 +304,7 @@ impl<'a> Parser {
         // &mut
     }
 
-    fn parse_postfix(&mut self) -> Result<ast::Node, String> {
+    fn parse_postfix(&mut self) -> Result<ast::Expr, String> {
         self.parse_primary()
     
         // Paths
@@ -310,19 +322,22 @@ impl<'a> Parser {
     /// | IDENTIFIER
     /// | STRING
     /// | '(' EXPRESSION ')'
-    fn parse_primary(&mut self) -> Result<ast::Node, String> {
+    fn parse_primary(&mut self) -> Result<ast::Expr, String> {
         let token = self.eat_token()
             .ok_or("Unexpected end of input, expected primary")?;
      
         match token {
             Token::Number {number} => {
-                Ok(ast::Node::Number { value: number.to_string() })
+                Ok(ast::Expr { kind: ast::ExprKind::Literal(number.to_string()) })
             },
 
             Token::Identifier {id} => {
-                Ok(ast::Node::Identifier { id: id.to_string() })
+                Ok(ast::Expr { 
+                    kind: ast::ExprKind::Path(
+                        ast::Path::new(id.to_string())
+                    )
+                })
             },
-
 
             _ => Err("Unexpected token, expected primary".to_string())
         }

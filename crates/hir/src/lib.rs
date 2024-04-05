@@ -39,7 +39,7 @@ pub enum Rvalue {
     /// Operand unchanged
     Use(Operand),
     /// Binary operation
-    BinaryOp(BinOp, Box<(Operand, Operand)>)
+    BinaryOp(BinOp, Box<Operand>, Box<Operand>)
 }
 
 #[derive(Clone, Debug)]
@@ -57,7 +57,7 @@ pub enum Operand {
 
 #[derive(Clone, Debug)]
 pub enum Statement {
-    Assign(Place, Rvalue),
+    Assign(Box<Place>, Box<Rvalue>),
 }
 
 #[derive(Clone, Debug)]

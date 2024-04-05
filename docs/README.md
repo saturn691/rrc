@@ -15,3 +15,11 @@ The `mir` folder takes the HIR input and transforms into a control-flow graph
 (CFG).
 
 The `codegen` folder takes the MIR and converts it into LLVM-IR.
+
+## Testing
+
+To test the program, run the following command:
+
+```bash
+./test.py
+```

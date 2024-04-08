@@ -36,15 +36,16 @@ fn main() {
     
     let root = parser.parse(&input).unwrap();
     
-    println!();
-    println!("{:#?}", root);
-    println!();
+    // println!();
+    // println!("{:#?}", root);
+    // println!();
 
     let hir = hir::hir_build(root);
-
+    
     match hir {
         Ok(hir) => {
-            println!("{:#?}", hir);
+            hir::graph::visualize(&hir);
+            // println!("{:#?}", hir);
             let code = codegen::lir_build(hir).unwrap();
             std::fs::write(output, code)
                 .expect("Unable to write file");

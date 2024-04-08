@@ -1,5 +1,7 @@
+#[no_mangle]
+pub
 fn
-main
+f
 (
 )
 ->

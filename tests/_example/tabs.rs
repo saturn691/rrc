@@ -1,1 +1,2 @@
-fn main		()	->	i32	{	0	}
+#[no_mangle]
+pub fn f		()	->	i32	{	0	}

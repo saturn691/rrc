@@ -21,7 +21,7 @@
             },
             "args": [
                 "--input",
-                "tests/_example/no_newlines.rs"
+                "tests/integer/comparison/eq.rs"
             ],
             "cwd": "${workspaceFolder}"
         }

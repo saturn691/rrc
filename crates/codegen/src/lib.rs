@@ -1,7 +1,6 @@
 //! Converts the HIR to LIR (Low-level Intermediate Representation)
-
 use hir::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 const INDENT: &str = "    ";
 
@@ -15,16 +14,12 @@ struct Codegen {
     code: String,
     body: Body,
 
-    /// The return type of the function
-    return_type: String,
-
     /// Used for SSA purposes
     reg_id: usize,
-    
+
     /// Due to the SSA nature of the codegen, we need to keep track of the
     /// mapping between places and registers
     place_map: HashMap<Place, String>,
-    const_map: HashMap<Const, String>,
 }
 
 impl Codegen {
@@ -32,42 +27,84 @@ impl Codegen {
         Codegen {
             code: String::new(),
             body: body,
-            return_type: String::new(),
             reg_id: 0,
             place_map: HashMap::new(),
-            const_map: HashMap::new(),
         }
     }
 
     pub fn build_lir(&mut self) -> Result<String, String> {
-        // Housekeeping
-        self.return_type = self.body.local_decls[0].ty.to_string();
-
         self.build_fn()
     }
 
     fn build_fn(&mut self) -> Result<String, String> {
         let name = &self.body.name;
         
-        self.code += format!("define {} @{}()", self.return_type, name)
-            .as_str();
-        self.code += " {\n";
-        self.code += "start:\n";
+        // Header
+        self.code += format!(
+            "define {} @{}()", 
+            self.return_decl().ty.to_string(), 
+            name
+        ).as_str();
 
-        for block in self.body.basic_blocks.clone() {
-            self.build_basic_block(&block);
-        }
-        
+        self.code += " {\n";
+        self.build_fn_code();
         self.code += "}\n";
 
         Ok(self.code.clone())
     }
 
-    fn build_basic_block(&mut self, block: &BasicBlock) {
-        let mut return_reg: String = String::new();
+    /// Uses graph traversal to build the function code.
+    /// Separated from the main function to improve readability.
+    fn build_fn_code(&mut self) {
+        let mut visited = HashSet::new();
+        let mut q = VecDeque::new();
+        q.push_back(BasicBlock(0));
+        
+        // Add local decls
+        for (i, local_decl) in self.body.local_decls.iter().enumerate() {
+            match &local_decl.local_info {
+                LocalInfo::User(id) => {
+                    self.code += "start:\n";
+                    self.code += format!(
+                        "{}%{} = alloca {}, align {}\n", 
+                        INDENT, 
+                        id, 
+                        local_decl.ty.to_string(),
+                        local_decl.ty.size()
+                    ).as_str();
+                    self.code += format!("{}br label %bb0\n", INDENT).as_str();
+                    self.place_map.insert(Place::Local(i), format!("%{}", id));
+                }
+                LocalInfo::Temp => {},
+            }
+        }
 
+        while let Some(block) = q.pop_front() {
+            if visited.insert(block) {
+                // Add header
+                self.code += format!("bb{}:\n", block.0).as_str();
+                self.build_basic_block(block);
+
+                let blockdata = &self.body.basic_blocks[block.0];
+
+                for successor in blockdata.terminator().successors() {
+                    q.push_back(successor);
+                }
+            }
+        }
+    }
+
+    /// Builds a basic block
+    /// e.g.
+    /// bb0:
+    ///     %1 = add i32 %0, 0      (statement)
+    ///     ret i32 %1              (terminator)
+    fn build_basic_block(&mut self, block: BasicBlock) {
+        let mut return_reg: String = String::new();
+        let blockdata = self.body.basic_blocks[block.0].clone();
+        
         // Statements
-        for statement in &block.statements {
+        for statement in blockdata.statements.iter() {
             match statement {
                 Statement::Assign(place, rvalue) => {
                     return_reg = self.build_assign(place, rvalue);
@@ -77,56 +114,131 @@ impl Codegen {
         }
 
         // Terminator
-        match block.terminator {
+        match &blockdata.terminator {
             Some(Terminator::Return) => {
+                let return_reg = self.get_unique_reg();
+                self.code += format!(
+                    "{}{} = load {}, {}* {}\n", 
+                    INDENT, 
+                    return_reg, 
+                    self.return_decl().ty.to_string(), 
+                    self.return_decl().ty.to_string(),
+                    self.place_map.get(&Place::Local(0)).unwrap()
+                ).as_str();
                 self.code += format!(
                     "{}ret {} {}\n", 
-                    INDENT, self.return_type, return_reg
+                    INDENT, 
+                    self.return_decl().ty.to_string(), 
+                    return_reg
                 ).as_str();
+            },
+            Some(Terminator::SwitchInt { value, targets } ) => {
+                let label_true = &targets.blocks[0];
+                let label_false =  &targets.blocks[1];
+
+                let reg = self.get_operand_reg(value);
+
+                self.code += format!(
+                    "{}br {} {}, label %bb{}, label %bb{}\n",
+                    INDENT,
+                    self.body.get_operand_type(&value),
+                    reg,
+                    label_true.0,
+                    label_false.0
+                ).as_str()
+
+            },
+            Some(Terminator::Goto { target }) => {
+                self.code += format!(
+                    "{}br label %bb{}\n",
+                    INDENT,
+                    target.0
+                ).as_str()  
             },
             _ => {}
         }
     }
 
-    fn build_assign(&mut self, place: &Place, rvalue: &Rvalue) -> String {
-        let reg: String = self.get_unique_id();
-        let mut ty: String = String::new();
-        
+    /// Builds a basic block assignment
+    /// e.g.
+    /// %1 = add i32 %0, 0
+    fn build_assign(
+        &mut self, 
+        place: &Place, 
+        rvalue: &Rvalue, 
+    ) -> String {
+        let mut reg: String;
+        let ty: String;
+        let mut ptr: bool = false;
+
         match place {
             Place::Local(id) => {
-                ty = self.body.local_decls[*id].ty.to_string();
+                let decl: &LocalDecl = &self.body.local_decls[*id];
+                ty = decl.ty.to_string();
+                match &decl.local_info {
+                    LocalInfo::User(id) => {
+                        reg = format!("%{}", id);                        
+                        ptr = true;
+                    },
+                    LocalInfo::Temp => {
+                        reg = self.get_unique_reg();
+                    }
+                }
             }
         }
         
+        // Update the hashmap
+        self.place_map.insert(place.clone(), reg.clone());
+        
         match rvalue {
             Rvalue::Use(operand) => {
-                // Update the hashmap
-                self.place_map.insert(place.clone(), reg.clone());
-                
-                match operand {
-                    Operand::Constant(constant) => {
-                        self.code += format!("{}{} = add {} {}, 0\n", 
-                            INDENT, reg, ty, constant.value
-                        ).as_str();
-                    }
-                    _ => {}
-                }
+                self.build_use(operand, &reg, &ty, ptr);       
             },
             Rvalue::BinaryOp(op, operand1, operand2) => {
-                self.build_binary(op, operand1, operand2, &reg, &ty);
-                
-                // Update the hashmap
-                self.place_map.insert(place.clone(), reg.clone());
+                if ptr {
+                    let reg1 = self.get_unique_reg();
+                    self.build_binary(op, operand1, operand2, &reg1, &ty);
+                    self.build_use(
+                        &Operand::Copy(place.clone()), &reg1, &ty, ptr);
+                } else {
+                    self.build_binary(op, operand1, operand2, &reg, &ty);
+                }
             }
-
+            
             Rvalue::UnaryOp(op, operand) => {
                 self.build_unary(op, operand, &reg, &ty);
-
-                self.place_map.insert(place.clone(), reg.clone());
             }
         }
 
         reg
+    }
+
+    fn build_use(
+        &mut self,
+        operand: &Operand,
+        reg: &String,
+        ty: &String,
+        ptr: bool
+    ) {
+        match operand {
+            Operand::Constant(constant) => {
+                if ptr {
+                    self.code += format!("{}store {} {}, {}* {}\n", 
+                        INDENT, ty, constant.value, ty, reg
+                    ).as_str();
+                } else {
+                    self.code += format!("{}{} = add {} {}, 0\n", 
+                        INDENT, reg, ty, constant.value
+                    ).as_str();
+                }
+            },
+            Operand::Copy(place) => {
+                self.code += format!("{}store {} {}, {}* {}\n", 
+                    INDENT, ty, reg, ty, self.place_map[place]
+                ).as_str();
+            }
+            _ => {}
+        }
     }
 
     /// Lowers binary operations
@@ -149,6 +261,12 @@ impl Codegen {
             BinOp::BitAnd => "and",
             BinOp::BitOr => "or",
             BinOp::BitXor => "xor",
+            BinOp::Eq => "icmp eq",
+            BinOp::Ne => "icmp ne",
+            BinOp::Lt => "icmp slt",
+            BinOp::Gt => "icmp sgt",
+            BinOp::Le => "icmp sle",
+            BinOp::Ge => "icmp sge",
             _ => unimplemented!()
         };
 
@@ -202,9 +320,14 @@ impl Codegen {
     }
 
     /// Get a unique identifier for a register for SSA
-    fn get_unique_id(&mut self) -> String {
+    fn get_unique_reg(&mut self) -> String {
         let id = self.reg_id;
         self.reg_id += 1;
         format!("%{}", id)
+    }
+
+    /// Helper function to get the return declaration
+    fn return_decl(&self) -> &LocalDecl {
+        &self.body.local_decls[0]
     }
 }

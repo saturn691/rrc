@@ -1,0 +1,25 @@
+name: Integration test
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  Test:
+    runs-on: ubuntu-latest
+    container:
+        image: ekidd/rust-musl-builder:latest
+    permissions:
+      packages: read
+      statuses: write
+      checks: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Build and test
+        id: test
+        timeout-minutes: 5
+        run: |
+          ./scripts/test.py

@@ -1,6 +1,7 @@
 //! The intermediate representation (IR) for the compiler.
 
 pub mod lowering;
+pub mod graph;
 
 use ast::types::*;
 use std::rc::Rc;
@@ -69,8 +70,14 @@ pub enum Statement {
 }
 
 #[derive(Clone, Debug)]
+pub struct SwitchTargets {
+    pub values: Vec<i128>,
+    pub blocks: Vec<BasicBlock>,
+}
+
+#[derive(Clone, Debug)]
 pub enum Terminator {
-    Goto { target: Box<BasicBlock> },
+    Goto { target: BasicBlock },
     /// A function call
     Call {
         /// The function to call
@@ -80,24 +87,68 @@ pub enum Terminator {
         /// The destination of the return value
         destination: Place,
         /// The block to jump to if the function returns
-        target: Box<BasicBlock>,
+        target: BasicBlock,
     },
     Return,
+    /// Switches based on the computed value
+    SwitchInt {
+        /// The value to switch on
+        value: Operand,
+        /// The targets for each case
+        targets: SwitchTargets,
+    },
+}
+
+impl Terminator {
+    pub fn successors(&self) -> Vec<BasicBlock> {
+        use Terminator::*;
+        match self {
+            Goto { target } => vec![*target],
+            Call { target, .. } => vec![*target],
+            Return => vec![],
+            SwitchInt { targets, .. } => targets.blocks.clone(),
+        }
+    }
+}
+
+/// Extra information about a local variable which is needed for code generation.
+#[derive(Clone, Debug)]
+pub enum LocalInfo {
+    /// User defined local variable or function parameter
+    User(String),
+    /// Temporary variables used by the compiler
+    Temp,
 }
 
 #[derive(Clone, Debug)]
 pub struct LocalDecl {
     pub mutable: bool,
-    pub ty: Type
+    pub ty: Type,
+    pub local_info: LocalInfo
 }
+
+impl LocalDecl {
+    pub fn size(&self) -> usize {
+        self.ty.size()
+    }
+}
+
+/// Pointer to the basic block (`BasicBlockData`) in the Control Flow Graph (CFG).
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub struct BasicBlock(pub usize);
 
 /// A node in the Control Flow Graph (CFG).
 #[derive(Clone, Debug)]
-pub struct BasicBlock {
+pub struct BasicBlockData {
     pub statements: Vec<Statement>,
     pub terminator: Option<Terminator>,
 }
 
+impl BasicBlockData {
+    pub fn terminator(&self) -> &Terminator {
+        self.terminator.as_ref().unwrap()
+    }
+}
 
 /// The main data structure for the intermediate representation.
 #[derive(Debug)]
@@ -105,7 +156,8 @@ pub struct Body {
     /// The name of the function e.g. `foo`
     pub name: String,
 
-    pub basic_blocks: Vec<BasicBlock>,
+    /// The basic blocks, should be accessed via BasicBlock
+    pub basic_blocks: Vec<BasicBlockData>,
 
     /// Ordered like:
     /// 1. return value
@@ -121,7 +173,7 @@ pub struct Body {
 impl Body {
     pub fn new(
         name: String,
-        basic_blocks: Vec<BasicBlock>,
+        basic_blocks: Vec<BasicBlockData>,
         local_decls: Vec<LocalDecl>,
         consts: Vec<Rc<Const>>,
         arg_count: usize,
@@ -132,6 +184,18 @@ impl Body {
             local_decls,
             consts,
             arg_count,
+        }
+    }
+
+    pub fn get_operand_type(&self, operand: &Operand) -> Type {
+        match operand {
+            Operand::Copy(place) | Operand::Move(place) => {
+                let idx = match place {
+                    Place::Local(idx) => *idx,
+                };
+                self.local_decls[idx].ty.clone()
+            }
+            Operand::Constant(constant) => constant.ty.clone(),
         }
     }
 }

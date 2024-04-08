@@ -43,15 +43,31 @@ pub enum BinOpKind {
     /// `%`
     Modulo,
     /// `^`
-    Xor,
+    BitXor,
     /// `&`
-    And,
+    BitAnd,
     /// `|`
-    Or,
+    BitOr,
     /// `<<`
     ShiftLeft,
     /// `>>`
     ShiftRight,
+    /// `==`
+    Eq,
+    /// `!=`
+    Ne,
+    /// `<`
+    Lt,
+    /// `<=`
+    Le,
+    /// `>`
+    Gt,
+    /// `>=`
+    Ge,
+    /// `&&`
+    And,
+    /// `||`
+    Or,
 }
 
 #[derive(Clone, Debug)]
@@ -74,6 +90,7 @@ pub enum PatKind {
 }
 
 #[derive(Debug)]
+/// A pattern e.g. `foo::bar`
 pub struct Pat {
     pub kind: PatKind,
 }
@@ -82,6 +99,14 @@ pub struct Pat {
 pub struct Param {
     pub ty: Type,
     pub pat: Pat
+}
+
+impl Param {
+    pub fn id(&self) -> String {
+        match &self.pat.kind {
+            PatKind::Identifier(id) => id.clone()
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -119,6 +144,10 @@ pub enum ExprKind {
     Binary(Box<Expr>, BinOpKind, Box<Expr>),
     Literal(String),
     Path(Path),
+    /// An if block, with an optional else block
+    /// e.g. `if expr { block } else { expr }`
+    If(Box<Expr>, Box<Block>, Option<Box<Expr>>),
+    Block(Box<Block>),
 }
 
 #[derive(Debug)]
@@ -168,6 +197,23 @@ pub struct Block {
 }
 
 #[derive(Debug)]
+pub struct Attr {
+    pub path: Path,
+}
+
+#[derive(Debug)]
+pub struct Visibility {
+    pub kind: VisibilityKind,
+}
+
+#[derive(Debug)]
+pub enum VisibilityKind {
+    Public,
+    Private,
+
+}
+
+#[derive(Debug)]
 pub struct Fn {
     pub sig: FnSig,
     pub body: Option<Box<Block>>
@@ -181,6 +227,8 @@ pub enum NodeKind {
 
 #[derive(Debug)]
 pub struct Node {
+    pub attrs: Vec<Attr>,
+    pub vis: Visibility,
     pub kind: NodeKind,
     pub identifier: Option<String>,
 }

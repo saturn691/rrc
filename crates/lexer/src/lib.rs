@@ -56,6 +56,9 @@ pub enum Token {
 
     // Keywords
     Fn,
+    Pub,
+    If,
+    Else,
 
     // Tokens
     
@@ -65,6 +68,14 @@ pub enum Token {
     ShiftLeft,
     /// >>
     ShiftRight,
+    /// <=
+    LtEq,
+    /// >=
+    GtEq,
+    /// ==
+    EqEq,
+    /// !=
+    NotEq,
 
     // One-character tokens
 
@@ -267,7 +278,11 @@ impl Cursor<'_> {
                 '>' => {
                     self.next();
                     ShiftRight
-                }
+                },
+                '=' => {
+                    self.next();
+                    GtEq
+                },
                 _ => Gt,
             }
 
@@ -275,9 +290,29 @@ impl Cursor<'_> {
                 '<' => {
                     self.next();
                     ShiftLeft
-                }
+                },
+                '=' => {
+                    self.next();
+                    LtEq
+                },
                 _ => Lt,
             }
+
+            '=' => match self.first() {
+                '=' => {
+                    self.next();
+                    EqEq
+                },
+                _ => Eq,
+            },
+
+            '!' => match self.first() {
+                '=' => {
+                    self.next();
+                    NotEq
+                },
+                _ => Bang,
+            },
             
             // One character tokens
             ';' => Semicolon,
@@ -295,8 +330,6 @@ impl Cursor<'_> {
             '~' => Tilde,
             '?' => Question,
             '$' => Dollar,
-            '=' => Eq,
-            '!' => Bang,
             '&' => And,
             '|' => Or,
             '+' => Plus,
@@ -368,6 +401,9 @@ impl Cursor<'_> {
             _ => {
                 match ident.as_str() {
                     "fn" => Fn,
+                    "pub" => Pub,
+                    "if" => If,
+                    "else" => Else,
                     _ => Identifier { id: ident },
                 }
             }

@@ -23,15 +23,16 @@ impl<'a> Parser {
     pub fn parse(&mut self, input: &String) -> Result<ast::Node, String> {
         self.tokens = lexer::tokenize(input);
         self.index = 0;
-        println!("Tokens: {:#?}", self.tokens);
+        // println!("Tokens: {:#?}", self.tokens);
         self.parse_fn()
     }  
 
     /// FUNCTION_DEFINITION
-    /// : 'fn' IDENTIFIER '(' PARAMS ')' '{' STATEMENTS '}'
-    /// ; 'fn' IDENTIFIER '(' PARAMS ')' '->' RETURN_TYPE '{' STATEMENTS '}'
+    /// ; ATTRS VISIBILITY 'fn' IDENTIFIER '(' PARAMS ')' '->' RETURN_TYPE 
+    /// '{' STATEMENTS '}'
     fn parse_fn(&mut self) -> Result<ast::Node, String> {
-        // TODO consider function modifiers like `pub`, `unsafe`, `const`, etc.
+        let attrs = self.parse_attributes()?;
+        let vis = self.parse_visibility();
         self.consume(Token::Fn);
         let name = self.expect_identifier()?;
         let mut r_type = ast::Type::Primitive(ast::PrimitiveType::Void);
@@ -60,9 +61,61 @@ impl<'a> Parser {
         };
 
         Ok(ast::Node {
+            attrs: attrs,
+            vis: vis,
             kind: ast::NodeKind::Fn(Box::new(fn_node)),
             identifier: Some(name)
         })
+    }
+
+    /// ATTRIBUTES
+    /// : # [ ATTRIBUTE* ]
+    fn parse_attributes(&mut self) -> Result<Vec<ast::Attr>, String> {
+        let mut attrs: Vec<ast::Attr> = Vec::new();
+        
+        match self.peek(0) {
+            Some(Token::Hash) => self.consume(Token::Hash),
+            _ => return Ok(attrs)
+        }
+
+        // Consume the open bracket
+        self.consume(Token::OpenBracket);
+
+        // TODO for now only accept #[no_mangle]
+        while let Some(token) = self.peek(0) {
+            match token {
+                Token::CloseBracket => {
+                    self.consume(Token::CloseBracket);
+                    break;
+                },
+                Token::Identifier { .. } => {
+                    let id = self.expect_identifier()?;
+                    attrs.push(ast::Attr { 
+                        path: ast::Path::new(id.to_string())
+                    })
+                },
+                _ => return Err("Unexpected token in attributes".to_string())
+            }
+        }
+
+        Ok(attrs)
+    }
+
+    /// VISIBILITY
+    /// : 'pub'
+    /// | 'priv'
+    fn parse_visibility(&mut self) -> ast::Visibility {
+        match self.peek(0) {
+            Some(Token::Pub) => {
+                self.consume(Token::Pub);
+                ast::Visibility {
+                    kind: ast::VisibilityKind::Public
+                }
+            },
+            _ => ast::Visibility {
+                kind: ast::VisibilityKind::Private
+            }
+        }
     }
 
     fn parse_return_type(&mut self) -> Result<ast::Type, String> {
@@ -78,6 +131,7 @@ impl<'a> Parser {
         }
     }
 
+    /// The general way to parse a block
     fn parse_block_common(&mut self) -> Result<ast::Block, String> {
         self.consume(Token::OpenBrace);
         let statements = self.parse_statements()?;
@@ -88,6 +142,14 @@ impl<'a> Parser {
                 stmts: statements
             }
         )
+    }
+
+    /// Used for parsing blocks inside expressions
+    fn parse_block_expr(&mut self) -> Result<ast::Expr, String> {
+        let block = self.parse_block_common()?;
+        Ok(ast::Expr {
+            kind: ast::ExprKind::Block(Box::new(block)) 
+        })
     }
 
     fn parse_statements(&mut self) -> Result<Vec<ast::Stmt>, String> {
@@ -138,9 +200,43 @@ impl<'a> Parser {
 
     /// Reference: https://doc.rust-lang.org/reference/expressions.html
     fn parse_expression(&mut self) -> Result<ast::Expr, String> {
-        self.parse_assignment()
-        
+        match self.peek(0) {
+            Some(Token::If) => self.parse_if(),
+            Some(Token::OpenBrace) => self.parse_block_expr(),
+            _ => self.parse_assignment()
+        }
         // expression , assignment_expression
+    }
+
+    /// IF_EXPRESSION
+    /// : 'if' EXPRESSION BLOCK_EXPRESSION ELSE_EXPRESSION?
+    fn parse_if(&mut self) -> Result<ast::Expr, String> {
+        self.consume(Token::If);
+        let expression = self.parse_expression()?;
+        let block = self.parse_block_common()?;
+        let else_block= self.parse_else()?;
+
+        Ok(ast::Expr {
+            kind: ast::ExprKind::If(
+                Box::new(expression),
+                Box::new(block),
+                Some(Box::new(else_block))
+            )
+        })
+    }
+
+    /// ELSE_EXPRESSION
+    /// : BLOCK_EXPRESSION
+    /// | IF_EXPRESSION
+    /// | IF_LET_EXPRESSION
+    fn parse_else(&mut self) -> Result<ast::Expr, String> {
+        self.consume(Token::Else);
+
+        match self.peek(0) {
+            Some(Token::If) => self.parse_if(),
+            Some(Token::OpenBrace) => self.parse_block_expr(),
+            _ => Err("Unexpected token in else block".to_string())
+        }
     }
 
     fn parse_assignment(&mut self) -> Result<ast::Expr, String> {
@@ -178,15 +274,65 @@ impl<'a> Parser {
         // &&
     }
 
+    /// Comparison operators require parentheses to avoid ambiguity.
+    /// Therefore leave it as right associative.
+    /// 
+    /// COMPARISON
+    /// : OR_EXPRESSION
+    /// | COMPARISON '<' OR_EXPRESSION
+    /// | COMPARISON '>' OR_EXPRESSION
+    /// | COMPARISON '<=' OR_EXPRESSION
+    /// | COMPARISON '>=' OR_EXPRESSION
+    /// | COMPARISON '==' OR_EXPRESSION
+    /// | COMPARISON '!=' OR_EXPRESSION
     fn parse_comparison(&mut self) -> Result<ast::Expr, String> {
-        self.parse_or()
-        
-        // ==
-        // !=
-        // >
-        // <
-        // >=
-        // <=
+        let left = self.parse_or()?;
+        let bin_op_kind: ast::BinOpKind;
+        let right: ast::Expr;
+
+        match self.peek(0) {
+            Some(Token::Lt) => {
+                self.consume(Token::Lt);
+                bin_op_kind = ast::BinOpKind::Lt;
+                right = self.parse_comparison()?;
+            },
+            Some(Token::Gt) => {
+                self.consume(Token::Gt);
+                bin_op_kind = ast::BinOpKind::Gt;
+                right = self.parse_comparison()?;
+            },
+            Some(Token::LtEq) => {
+                self.consume(Token::LtEq);
+                bin_op_kind = ast::BinOpKind::Le;
+                right = self.parse_comparison()?;
+            },
+            Some(Token::GtEq) => {
+                self.consume(Token::GtEq);
+                bin_op_kind = ast::BinOpKind::Ge;
+                right = self.parse_comparison()?;
+            },
+            Some(Token::EqEq) => {
+                self.consume(Token::EqEq);
+                bin_op_kind = ast::BinOpKind::Eq;
+                right = self.parse_comparison()?;
+            },
+            Some(Token::NotEq) => {
+                self.consume(Token::NotEq);
+                bin_op_kind = ast::BinOpKind::Ne;
+                right = self.parse_comparison()?;
+            },
+
+            // Short circuit
+            _ => return Ok(left)
+        }
+
+        Ok(ast::Expr {
+            kind: ast::ExprKind::Binary(
+                Box::new(left), 
+                bin_op_kind, 
+                Box::new(right)
+            )
+        })
     }
     
     /// OR_EXPRESSION
@@ -203,7 +349,7 @@ impl<'a> Parser {
                     left = ast::Expr {
                         kind: ast::ExprKind::Binary(
                             Box::new(left), 
-                            ast::BinOpKind::Or, 
+                            ast::BinOpKind::BitOr, 
                             Box::new(right)
                         )
                     }
@@ -231,7 +377,7 @@ impl<'a> Parser {
                     left = ast::Expr {
                         kind: ast::ExprKind::Binary(
                             Box::new(left), 
-                            ast::BinOpKind::Xor, 
+                            ast::BinOpKind::BitXor, 
                             Box::new(right)
                         )
                     }
@@ -259,7 +405,7 @@ impl<'a> Parser {
                     left = ast::Expr {
                         kind: ast::ExprKind::Binary(
                             Box::new(left), 
-                            ast::BinOpKind::And, 
+                            ast::BinOpKind::BitAnd, 
                             Box::new(right)
                         )
                     }

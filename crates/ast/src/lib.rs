@@ -95,6 +95,19 @@ pub struct Pat {
     pub kind: PatKind,
 }
 
+impl Pat {
+    pub fn new(id: String) -> Self {
+        Pat {
+            kind: PatKind::Identifier(id)
+        }
+    }
+    pub fn id(&self) -> String {
+        match &self.kind {
+            PatKind::Identifier(id) => id.clone()
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Param {
     pub ty: Type,
@@ -135,6 +148,19 @@ impl Path {
                 identifier: id
             }]
         }
+    }
+}
+
+impl std::fmt::Display for Path {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let mut path = String::new();
+        for (i, segment) in self.segments.iter().enumerate() {
+            if i > 0 {
+                path.push_str("::");
+            }
+            path.push_str(&segment.identifier);
+        }
+        write!(f, "{}", path)
     }
 }
 

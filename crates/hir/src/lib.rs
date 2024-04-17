@@ -100,6 +100,16 @@ pub enum Terminator {
 }
 
 impl Terminator {
+    pub fn successor(&self) -> BasicBlock {
+        use Terminator::*;
+        match self {
+            Goto { target } => *target,
+            Call { target, .. } => *target,
+            Return => panic!("Return has no successor"),
+            SwitchInt { targets, .. } => targets.blocks[0],
+        }
+    }
+    
     pub fn successors(&self) -> Vec<BasicBlock> {
         use Terminator::*;
         match self {

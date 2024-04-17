@@ -1,7 +1,7 @@
 //! Lowers the AST to the HIR.
 
 use ast::*;
-use std::rc::Rc;
+use std::{collections::HashMap, rc::Rc};
 use crate::*;
 
 /// Entry point for lowering the AST to the HIR
@@ -27,6 +27,9 @@ struct Builder {
     local_decls: Vec<LocalDecl>,
     consts: Vec<Rc<Const>>,
     call_frame: Vec<CallFrame>,
+
+    // Must be stack in the future
+    id_to_place: HashMap<String, Place>,
 }
 
 
@@ -37,6 +40,7 @@ impl Builder {
             local_decls: Vec::new(),
             consts: Vec::new(),
             call_frame: Vec::new(),
+            id_to_place: HashMap::new(),
         }
     }
     
@@ -111,13 +115,44 @@ impl Builder {
                     bb = self.build_return(expr, target_block);
                 }
                 StmtKind::Semi(_expr) => unimplemented!(),
-                StmtKind::Let(_local) => unimplemented!(),
+                StmtKind::Let(local) => {
+                    self.build_let(local, target_block);
+                },
 
                 _ => unimplemented!()
             }
         }
 
         bb
+    }
+
+    /// Builds let statements from the AST
+    fn build_let(
+        &mut self, 
+        local: Box<Local>, 
+        target_block: BasicBlock
+    ) {
+        let ty = *local.ty.unwrap();
+        let id = local.pat.id();
+
+        // `let x`
+        let new_local = self.new_local(
+            ty, LocalInfo::User(id.clone())
+        );
+
+        self.id_to_place.insert(id, new_local.clone());
+
+        match local.kind {
+            LocalKind::Init(expr) => {
+                self.build_expr(
+                    expr, 
+                    target_block, 
+                    &new_local, 
+                    Some(ty)
+                );
+            }
+            _ => unimplemented!()
+        }
     }
 
     /// Handles expressions from the AST
@@ -133,13 +168,20 @@ impl Builder {
         
         match expr.kind {
             ExprKind::Path(path) => {
-                unimplemented!()
+                rvalue = Some(self.build_path(path));
             }
             ExprKind::Literal(lit) => {
                 rvalue = Some(self.build_number(lit, target_type));
             }
             ExprKind::If(cond, then_block, else_block) => {
-                bb = self.build_if(cond, then_block, else_block, target_block, target_place, target_type);
+                bb = self.build_if(
+                    cond, 
+                    then_block, 
+                    else_block, 
+                    target_block, 
+                    target_place, 
+                    target_type
+                );
             }
             ExprKind::Binary(left, bin_op , right) => {
                 rvalue = Some(self.build_binary(
@@ -151,7 +193,7 @@ impl Builder {
             },
             ExprKind::Block(block) => {
                 bb = self.build_blocks(block, target_block);
-            }
+            },
 
             _ => unimplemented!()
         };
@@ -171,6 +213,16 @@ impl Builder {
         bb
     }
 
+    /// Handles `path` expressions from the AST e.g. `x`
+    fn build_path(
+        &mut self, 
+        path: Path
+    ) -> Rvalue {
+        let id = path.to_string();
+        let place = self.id_to_place.get(&id).unwrap();
+        Rvalue::Use(Operand::Copy(place.clone()))
+    }
+
     /// Handles `if` expressions from the AST
     fn build_if(
         &mut self,
@@ -183,11 +235,11 @@ impl Builder {
     ) -> BasicBlock {
         // Create the blocks for ordering
         let then_bb = self.new_block();
-        let else_bb: BasicBlock = match else_block {
-            Some(_) => self.new_block(),
-            None => BasicBlock(0)   // Dummy block
-        };
-        let end_bb = self.new_block();
+
+        // Check if end_bb is needed
+        let end_bb = self.get_block(target_block)
+            .terminator
+            .map_or_else(|| self.new_block(), |t| t.successor());
 
         // Then basic block
         self.build_blocks(then_block, then_bb);
@@ -197,26 +249,27 @@ impl Builder {
         
         // Else basic block
         let mut dest_bb = end_bb;
-        match else_block {
-            Some(else_block) => {
-                self.build_expr(
-                    else_block,
-                     else_bb, 
-                     target_place, 
-                     target_type
-                );
-                self.basic_blocks[else_bb.0].terminator = Some(Terminator::Goto {
-                    target: end_bb,
-                });
-                dest_bb = else_bb;
-            },
-            None => {}
+        if let Some(else_expr) = else_block {
+            let else_bb = self.new_block();
+            // Connect the else block to the end block first so it can be 
+            // modified if necessary
+            self.basic_blocks[else_bb.0].terminator = Some(Terminator::Goto {
+                target: end_bb,
+            });
+
+            self.build_expr(
+                else_expr,
+                else_bb, 
+                target_place,
+                target_type
+            );
+            dest_bb = else_bb;
         }
         
         // Condition basic block
         let bool_type = Type::Primitive(PrimitiveType::I1);
         let cond_place = self.new_local(bool_type, LocalInfo::Temp);
-        self.build_expr(cond, target_block, &cond_place, Some(bool_type));
+        self.build_expr(cond, target_block, &cond_place, target_type);
         self.basic_blocks[target_block.0].terminator = Some(Terminator::SwitchInt {
             value: Operand::Copy(cond_place.clone()),
             targets: SwitchTargets {
@@ -323,6 +376,11 @@ impl Builder {
         );
 
         BasicBlock(self.basic_blocks.len() - 1)
+    }
+
+    /// Helper function to generate a lookup a block
+    fn get_block(&self, block: BasicBlock) -> BasicBlockData {
+        self.basic_blocks[block.0].clone()
     }
 
     /// Helper function to generate a new "local" place

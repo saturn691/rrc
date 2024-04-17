@@ -61,10 +61,10 @@ impl Codegen {
         q.push_back(BasicBlock(0));
         
         // Add local decls
+        self.code += "start:\n";
         for (i, local_decl) in self.body.local_decls.iter().enumerate() {
             match &local_decl.local_info {
                 LocalInfo::User(id) => {
-                    self.code += "start:\n";
                     self.code += format!(
                         "{}%{} = alloca {}, align {}\n", 
                         INDENT, 
@@ -72,12 +72,12 @@ impl Codegen {
                         local_decl.ty.to_string(),
                         local_decl.ty.size()
                     ).as_str();
-                    self.code += format!("{}br label %bb0\n", INDENT).as_str();
                     self.place_map.insert(Place::Local(i), format!("%{}", id));
                 }
                 LocalInfo::Temp => {},
             }
         }
+        self.code += format!("{}br label %bb0\n", INDENT).as_str();
 
         while let Some(block) = q.pop_front() {
             if visited.insert(block) {
@@ -187,9 +187,6 @@ impl Codegen {
             }
         }
         
-        // Update the hashmap
-        self.place_map.insert(place.clone(), reg.clone());
-        
         match rvalue {
             Rvalue::Use(operand) => {
                 self.build_use(operand, &reg, &ty, ptr);       
@@ -197,19 +194,30 @@ impl Codegen {
             Rvalue::BinaryOp(op, operand1, operand2) => {
                 if ptr {
                     let reg1 = self.get_unique_reg();
-                    self.build_binary(op, operand1, operand2, &reg1, &ty);
-                    self.build_use(
-                        &Operand::Copy(place.clone()), &reg1, &ty, ptr);
-                } else {
-                    self.build_binary(op, operand1, operand2, &reg, &ty);
+                    self.build_binary(op, operand1, operand2, &reg1);
+                    self.store(&reg1, &ty, place);
+                    } else {
+                        self.build_binary(op, operand1, operand2, &reg);
+                    }
                 }
-            }
-            
-            Rvalue::UnaryOp(op, operand) => {
-                self.build_unary(op, operand, &reg, &ty);
+                
+                Rvalue::UnaryOp(op, operand) => {
+                    if ptr {
+                        let reg1 = self.get_unique_reg();
+                        self.load(&reg1, &ty, place);
+                        self.place_map.insert(place.clone(), reg1.clone());
+                        let reg2 = self.get_unique_reg();
+                        self.build_unary(op, operand, &reg2, &ty);
+                        self.store(&reg2, &ty, place);
+                    } else {
+                        self.build_unary(op, operand, &reg, &ty);
+                    }
             }
         }
-
+        
+        // Update the hashmap (after to avoid self-referential issues in UnaryOp)
+        self.place_map.insert(place.clone(), reg.clone());
+        
         reg
     }
 
@@ -233,9 +241,7 @@ impl Codegen {
                 }
             },
             Operand::Copy(place) => {
-                self.code += format!("{}store {} {}, {}* {}\n", 
-                    INDENT, ty, reg, ty, self.place_map[place]
-                ).as_str();
+                self.load(reg, ty, place);
             }
             _ => {}
         }
@@ -248,7 +254,6 @@ impl Codegen {
         operand1: &Box<Operand>, 
         operand2: &Box<Operand>,
         reg: &String,
-        ty: &String
     ) {
         let op_str = match op {
             BinOp::Add => "add",
@@ -274,6 +279,8 @@ impl Codegen {
         let reg1 = self.get_operand_reg(operand1);
         let reg2 = self.get_operand_reg(operand2);
 
+        let ty = self.get_binary_type(operand1, operand2).to_string();
+
         self.code += format!("{}{} = {} {} {}, {}\n", 
             INDENT, reg, op_str, ty, reg1, reg2
         ).as_str();
@@ -290,6 +297,9 @@ impl Codegen {
         // Get the register name for the operand
         let reg1 = self.get_operand_reg(operand);
 
+        // Update the hashmap
+        self.place_map.insert(Place::Local(self.reg_id), reg.clone());
+
         match op {
             UnOp::Neg => {
                 self.code += format!("{}{} = sub {} 0, {}\n", 
@@ -304,6 +314,38 @@ impl Codegen {
         }
     }
 
+    /// Helper function to store
+    /// Output: store i32 %reg, i32* %place
+    fn store(&mut self, reg: &String, ty: &String, place: &Place) {
+        match place {
+            Place::Local(id) => {
+                let decl: &LocalDecl = &self.body.local_decls[*id];
+                match &decl.local_info {
+                    LocalInfo::User(id) => {
+                        self.code += format!("{}store {} {}, {}* %{}\n", 
+                            INDENT, ty, reg, ty, id
+                        ).as_str();
+                    },
+                    LocalInfo::Temp => {
+                        // Without the * in the store instruction
+                        self.code += format!("{}store {} {}, {} {}\n", 
+                            INDENT, ty, reg, ty, self.place_map[place]
+                        ).as_str();
+
+                    },
+                }            
+            }
+        }
+    }
+
+    /// Helper function to load
+    /// Output: %reg = load i32, i32* %place
+    fn load(&mut self, reg: &String, ty: &String, place: &Place) {
+        self.code += format!("{}{} = load {}, {}* {}\n", 
+            INDENT, reg, ty, ty, self.place_map[place]
+        ).as_str();
+    }
+
     fn get_operand_reg(&self, operand: &Operand) -> String {
         match operand {
             Operand::Copy(place) => {
@@ -316,6 +358,33 @@ impl Codegen {
             },
 
             _ => panic!("Operand not supported")
+        }
+    }
+
+    /// Helper function to get the types of the operand in binary
+    fn get_binary_type(&self, operand1: &Operand, operand2: &Operand) -> ast::Type {
+        let ty1 = self.get_unary_type(operand1);
+        let ty2 = self.get_unary_type(operand2);
+
+        // Return the higher type
+        if ty1.size() > ty2.size() {
+            ty1
+        } else {
+            ty2
+        }
+    }
+
+    /// Helper function to get the types of the operand in unary
+    fn get_unary_type(&self, operand: &Operand) -> ast::Type {
+        match operand {
+            Operand::Copy(place) => {
+                let idx = match place {
+                    Place::Local(idx) => *idx,
+                };
+                self.body.local_decls[idx].ty
+            }
+            Operand::Constant(constant) => constant.ty,
+            _ => unimplemented!()
         }
     }
 

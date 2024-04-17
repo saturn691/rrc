@@ -21,7 +21,7 @@
             },
             "args": [
                 "--input",
-                "tests/integer/comparison/eq.rs"
+                "tests/control_flow/if.rs"
             ],
             "cwd": "${workspaceFolder}"
         }

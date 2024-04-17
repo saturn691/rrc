@@ -59,6 +59,7 @@ pub enum Token {
     Pub,
     If,
     Else,
+    Let,
 
     // Tokens
     
@@ -404,6 +405,7 @@ impl Cursor<'_> {
                     "pub" => Pub,
                     "if" => If,
                     "else" => Else,
+                    "let" => Let,
                     _ => Identifier { id: ident },
                 }
             }

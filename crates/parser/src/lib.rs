@@ -44,7 +44,7 @@ impl<'a> Parser {
         match self.peek(0) {
             Some(Token::RightArrow) => {
                 self.consume(Token::RightArrow);
-                r_type = self.parse_return_type()?;
+                r_type = self.parse_type()?;
            }
             _ => {}
         }
@@ -118,7 +118,7 @@ impl<'a> Parser {
         }
     }
 
-    fn parse_return_type(&mut self) -> Result<ast::Type, String> {
+    fn parse_type(&mut self) -> Result<ast::Type, String> {
         let id = self.expect_identifier()?;
         
         match id.as_str() {
@@ -169,6 +169,10 @@ impl<'a> Parser {
     }
 
     fn parse_statement(&mut self) -> Result<ast::Stmt, String> {
+        if self.peek(0) == Some(&Token::Let) {
+            return self.parse_let();
+        }
+
         let expr = self.parse_expression()?;
         
         match self.peek(0) {
@@ -206,6 +210,34 @@ impl<'a> Parser {
             _ => self.parse_assignment()
         }
         // expression , assignment_expression
+    }
+
+    /// LET_EXPRESSION
+    /// : 'let' IDENTIFIER ':' TYPE '=' EXPRESSION ';'
+    fn parse_let(&mut self) -> Result<ast::Stmt, String> {
+        self.consume(Token::Let);
+        let id = self.expect_identifier()?;
+
+        let ty = if self.peek(0) == Some(&Token::Colon) {
+            self.consume(Token::Colon);
+            Some(Box::new(self.parse_type()?))
+        } else {
+            None
+        };
+
+        self.consume(Token::Eq);
+        let expr = self.parse_expression()?;
+        self.consume(Token::Semicolon);
+
+        Ok(ast::Stmt {
+            kind: ast::StmtKind::Let(Box::new(
+                ast::Local {
+                    pat: Box::new(ast::Pat::new(id)),
+                    ty: ty,
+                    kind: ast::LocalKind::Init(Box::new(expr))
+                }
+            ))
+        })
     }
 
     /// IF_EXPRESSION
